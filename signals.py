@@ -131,3 +131,42 @@ def get_stylometric_score(text: str) -> tuple[float, dict]:
 
     stylometric_score = (sentence_variance_score + ttr_score + punctuation_score) / 3
     return stylometric_score, metrics
+
+
+_MARKER_PHRASES = [
+    "furthermore",
+    "moreover",
+    "it is important to note",
+    "additionally",
+    "in conclusion",
+    "on the other hand",
+    "in summary",
+    "that said",
+    "it's worth noting",
+    "overall,",
+]
+
+# Density at or above this fraction of words spent on marker phrases maps to a
+# full 1.0 "AI-like" score; calibrated against the 4 spec calibration inputs.
+_MARKER_DENSITY_CEILING = 0.03
+
+
+def get_marker_score(text: str) -> tuple[float, dict]:
+    """
+    Signal 3 (ensemble stretch) — lexical hedging/transition-phrase frequency.
+
+    Counts occurrences of a fixed list of formal transition/hedging phrases AI
+    text tends to over-use, scaled by word count. Genuinely distinct from
+    Signal 1 (holistic LLM judgment) and Signal 2 (structural/statistical) —
+    this one looks at specific word/phrase choice, which neither of the other
+    two checks (see planning.md "Ensemble Detection" section).
+    """
+    words = text.split()
+    lower_text = text.lower()
+
+    match_count = sum(lower_text.count(phrase) for phrase in _MARKER_PHRASES)
+    density = match_count / len(words) if words else 0.0
+    marker_score = max(0.0, min(1.0, density / _MARKER_DENSITY_CEILING))
+
+    metrics = {"marker_match_count": match_count, "marker_density": density}
+    return marker_score, metrics

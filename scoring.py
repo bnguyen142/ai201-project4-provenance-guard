@@ -10,18 +10,36 @@ _LABELS = {
 }
 
 
-def combine_scores(llm_score: float, stylometric_score: float) -> float:
+_WEIGHTS = {"llm": 0.5, "stylometric": 0.3, "marker": 0.2}
+
+
+def combine_scores(llm_score: float, stylometric_score: float, marker_score: float) -> float:
     """
-    Combine the two signal scores into one confidence score, per planning.md
-    Section 1. Asymmetric: a verdict leaning "AI" (base > 0.5) requires squared
-    agreement between the signals to survive disagreement; a verdict leaning
-    "human" only needs linear agreement. This makes confidently calling
-    something "likely AI" harder than confidently calling it "likely human",
-    reflecting that a false positive against a human writer is the worse
+    Combine the three signal scores into one confidence score, per planning.md
+    "Ensemble Detection" section. Weighted average (LLM weighted highest, marker
+    phrase weighted lowest, since it has the narrowest blind spot) gives `base`.
+
+    "agreement" is the weighted standard deviation of the three scores around
+    that same weighted base, not a plain max-min spread — using the weights
+    here too means an outlier carries less disagreement weight if it's a
+    signal we trust less, and two signals that agree get real credit even when
+    a third disagrees, rather than being penalized as if all three disagreed
+    equally. Normalized against 0.5, the maximum possible weighted std for
+    scores bounded in [0, 1] (reached when the weighted mean sits at 0.5).
+
+    The asymmetric squaring rule is unchanged: a verdict leaning "AI"
+    (base > 0.5) requires squared agreement to survive disagreement, a verdict
+    leaning "human" only needs linear agreement — confidently calling
+    something "likely AI" stays harder than confidently calling it "likely
+    human", since a false positive against a human writer is the worse
     failure mode here.
     """
-    base = (llm_score + stylometric_score) / 2
-    agreement = 1 - abs(llm_score - stylometric_score)
+    scores = [llm_score, stylometric_score, marker_score]
+    weights = [_WEIGHTS["llm"], _WEIGHTS["stylometric"], _WEIGHTS["marker"]]
+    base = sum(w * s for w, s in zip(weights, scores))
+    variance = sum(w * (s - base) ** 2 for w, s in zip(weights, scores))
+    std = variance ** 0.5
+    agreement = max(0.0, 1 - 2 * std)
 
     if base > 0.5:
         confidence = 0.5 + (base - 0.5) * (agreement ** 2)

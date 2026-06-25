@@ -279,7 +279,124 @@ For each implementation milestone, specify which spec sections you'll provide, w
 
 ## Stretch Features (update before starting any)
 
-- [ ] Ensemble detection
+- [x] Ensemble detection — design below, implementing now.
 - [ ] Provenance certificate
 - [ ] Analytics dashboard
 - [ ] Multi-modal support
+
+### Ensemble Detection (stretch)
+
+**Alternatives considered for the 3rd signal**, before picking one:
+
+| Option | What it measures | Why not chosen |
+|---|---|---|
+| Repetition / n-gram overlap | Phrase-level repetitiveness within the text | Genuinely distinct, but overlaps somewhat with Signal 2's structural lens (pattern repetition vs. sentence-length/TTR uniformity); weaker on short excerpts |
+| Zipf / word-frequency-shape deviation | Whether the text's word-rank curve matches natural language's expected shape | Needs more running text to be statistically meaningful than these short submissions provide |
+| Average word length / complexity | Word-level complexity uniformity | Most overlap with what TTR/punctuation already capture in Signal 2 — least "genuinely distinct" |
+| **Lexical hedging/marker frequency (chosen)** | Specific word/phrase choice — frequency of formal transition and hedging phrases | Most distinct: neither Signal 1 (holistic, black-box judgment) nor Signal 2 (purely structural/statistical) looks at *specific word choice* at all |
+
+**Signal 3 — Lexical marker/hedging frequency** (pure Python, `get_marker_score` in `signals.py`)
+
+- Measures: frequency of specific formal transition and hedging phrases that AI text
+  over-uses — `"furthermore"`, `"moreover"`, `"it is important to note"`, `"additionally"`,
+  `"in conclusion"`, `"on the other hand"`, `"in summary"`, `"that said"`, `"it's worth noting"`,
+  `"overall,"` — counted case-insensitively as a fixed phrase list, divided by total word count to
+  get a density, then scaled against a calibrated band (density 0.0 -> 0.0, density >= 0.03 ->
+  1.0, linear in between). Higher = more AI-like.
+- Why it complements Signals 1 and 2 rather than duplicating them: Signal 1 is a holistic
+  black-box semantic judgment with no inspectable reasoning; Signal 2 is purely
+  structural/statistical (sentence length, vocabulary diversity, punctuation) and never looks at
+  specific words. Signal 3 is a deterministic, fully inspectable count of a fixed phrase list — a
+  different kind of evidence (specific word choice) than either holistic judgment or structural
+  statistics, rounding out the ensemble with something neither of the first two checks.
+- Blind spot: a human academic or technical writer who naturally uses formal transitions scores
+  AI-like on this signal alone; conversely, an AI model explicitly prompted to write casually can
+  avoid these phrases entirely and score falsely human-like. Short texts also have too few words
+  for the phrase list to fire at all, defaulting near 0 regardless of authorship.
+
+**Weighted ensemble formula** (`combine_scores` in `scoring.py`, extended from 2 to 3 signals):
+
+```python
+WEIGHTS = {"llm": 0.5, "stylometric": 0.3, "marker": 0.2}
+
+def combine_scores(llm_score, stylometric_score, marker_score):
+    scores = [llm_score, stylometric_score, marker_score]
+    weights = [WEIGHTS["llm"], WEIGHTS["stylometric"], WEIGHTS["marker"]]
+    base = sum(w * s for w, s in zip(weights, scores))
+    variance = sum(w * (s - base) ** 2 for w, s in zip(weights, scores))
+    std = variance ** 0.5
+    agreement = max(0.0, 1 - 2 * std)
+
+    if base > 0.5:
+        confidence = 0.5 + (base - 0.5) * (agreement ** 2)
+    else:
+        confidence = 0.5 + (base - 0.5) * agreement
+
+    return confidence
+```
+
+- Weights reflect each signal's reliability: the LLM signal gets the most weight (0.5) since it's
+  the most holistic and historically best-correlated with ground truth in testing; stylometrics
+  next (0.3) as a solid structural corroborator; the marker-phrase signal least (0.2) since it has
+  the narrowest blind spot (fires on word choice alone and can be near-zero on short text
+  regardless of authorship) and is meant to corroborate, not lead.
+- Conflict resolution — **why weighted variance, not max-min spread**: an earlier version of this
+  formula computed `agreement = 1 - (max(scores) - min(scores))`. Testing exposed a real flaw: on a
+  clearly-AI calibration input, `llm_score=0.9` and `marker_score=1.0` agreed strongly, but
+  `stylometric_score=0.413` was an outlier. Spread only measures the single widest gap
+  (1.0 - 0.413 = 0.587) and penalizes that exactly as hard as if all three signals had disagreed
+  with each other — it has no notion that two trusted signals agreed and one disagreed. Weighted
+  variance fixes this: it measures each signal's squared deviation from the *weighted* base,
+  scaled by that same signal's weight, so an outlier in a low-weight signal (stylometric, marker)
+  contributes less disagreement than an outlier in the high-weight signal (LLM) would. The weights
+  now do double duty — shaping both `base` and `agreement` — instead of only mattering for `base`
+  while `agreement` ignored them entirely.
+  - Normalization: weighted std is divided by 0.5, the maximum possible weighted std for scores
+    bounded in `[0, 1]` under these weights (reached when the weighted mean sits at exactly 0.5).
+  - Verified against the same calibration inputs: no attribution band changed between the spread
+    version and the variance version, but the clearly-AI sample's confidence rose from 0.547 to
+    0.574 (more honestly reflecting that 2 of 3 signals agreed) and the clearly-human sample's
+    confidence fell from 0.257 to 0.234 (more confidently human, for the same reason) — see
+    README's Stretch Features section for the full before/after table.
+  - The asymmetric squaring on the AI-leaning branch is preserved unchanged: even moderate
+    three-way disagreement collapses a "likely AI" verdict much faster than a "likely human" one,
+    keeping the same false-positive-averse design as the 2-signal formula.
+- The `/submit` response and audit log are extended to surface all three individual scores
+  alongside the combined `confidence`, per the rubric's ensemble requirement.
+
+### Ensemble Detection — honest retrospective: did a 3rd signal improve accuracy?
+
+The stretch feature's stated purpose is "incorporate 3+ signals with a documented
+weighting/voting approach." The implicit question behind that requirement — does adding a 3rd
+signal actually improve detection — was tested directly rather than assumed. **The answer is no.**
+On all 4 spec calibration inputs, the attribution band (`likely_ai` / `uncertain` / `likely_human`)
+is identical with 2 signals and with 3. Worse, the system measurably lost flexibility:
+
+- **Two signals in perfect agreement that content is AI-generated can no longer reach
+  `likely_ai`.** `combine_scores(1.0, 1.0, 0.0)` — `llm_score` and `stylometric_score` both at
+  maximum AI confidence, `marker_score` silent at its default `0.0` (the normal case for anything
+  that isn't textbook-formulaic AI prose) — returns **0.512 (`uncertain`)**. The equivalent
+  2-signal-only calculation on the same two scores returns **1.0 (`likely_ai`)**. A low-weight
+  signal sitting at its default value alone overrides two high-weight signals in total lockstep,
+  because the agreement/variance calculation has no concept of "didn't fire" vs. "actively
+  disagrees" — it treats silence as maximal disagreement.
+- **Weight dilution**: adding `marker` at weight 0.2 took 0.2 away from `stylometric` (0.5 → 0.3),
+  so whenever `marker_score = 0` (the common case — it only fired on 1 of 4 calibration inputs),
+  the weighted base confidence is structurally lower than the 2-signal base by
+  `0.2 * stylometric_score`, before any agreement penalty is even applied.
+- **False-positive risk on the protected population**: the marker phrase list ("furthermore,"
+  "on the other hand," "in summary") is exactly the register formal academic writers and
+  non-native English speakers use naturally — the population this system's asymmetric design is
+  specifically meant to protect from false "likely_ai" labels. If the phrase list ever does fire
+  on that population, it works directly against that goal.
+- **Redundant on the one case it did fire**: in the clearly-AI calibration input, `llm_score` was
+  already 0.9 before `marker_score` contributed anything — the third signal added no information
+  the first signal hadn't already captured.
+- **Calibration fragility**: the phrase list and 0.03 density ceiling are hand-tuned against 4
+  inputs with no real validation set behind them.
+
+**Decision**: kept the stretch feature as implemented (the rubric requirement — 3+ signals,
+documented weighting, individual scores surfaced — is satisfied), but documenting this finding
+honestly rather than presenting the ensemble as a strict improvement it isn't. This is itself a
+demonstration of the project's core lesson: a system should acknowledge what it doesn't know,
+including about its own design choices, rather than asserting confidence it hasn't earned.

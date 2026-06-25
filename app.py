@@ -7,7 +7,7 @@ from flask_limiter.util import get_remote_address
 
 import audit
 from scoring import combine_scores, get_attribution, get_label
-from signals import get_llm_score, get_stylometric_score
+from signals import get_llm_score, get_marker_score, get_stylometric_score
 
 os.makedirs("logs", exist_ok=True)
 audit.init_db()
@@ -34,7 +34,8 @@ def submit():
 
     llm_score, _reasoning = get_llm_score(text)
     stylometric_score, _metrics = get_stylometric_score(text)
-    confidence = combine_scores(llm_score, stylometric_score)
+    marker_score, _marker_metrics = get_marker_score(text)
+    confidence = combine_scores(llm_score, stylometric_score, marker_score)
     attribution = get_attribution(confidence)
     label = get_label(attribution)
 
@@ -46,6 +47,7 @@ def submit():
         confidence=confidence,
         llm_score=llm_score,
         stylometric_score=stylometric_score,
+        marker_score=marker_score,
     )
 
     return jsonify(
@@ -57,6 +59,7 @@ def submit():
             "signals": {
                 "llm_score": llm_score,
                 "stylometric_score": stylometric_score,
+                "marker_score": marker_score,
             },
             "status": "classified",
         }
