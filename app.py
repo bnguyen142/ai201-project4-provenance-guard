@@ -1,7 +1,7 @@
 import os
 import uuid
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template_string, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -91,6 +91,42 @@ def appeal():
 @app.route("/log", methods=["GET"])
 def log():
     return jsonify({"entries": audit.get_log()})
+
+
+_ANALYTICS_TEMPLATE = """
+<!doctype html>
+<html>
+<head><title>Provenance Guard — Analytics</title></head>
+<body style="font-family: sans-serif; max-width: 640px; margin: 2rem auto;">
+  <h1>Provenance Guard — Analytics</h1>
+  <p>Total submissions: <strong>{{ data.total_submissions }}</strong></p>
+
+  <h2>Detection Pattern</h2>
+  <table border="1" cellpadding="6" style="border-collapse: collapse; width: 100%;">
+    <tr><th>Attribution</th><th>Count</th><th>Percentage</th></tr>
+    {% for label, stats in data.detection_pattern.items() %}
+    <tr><td>{{ label }}</td><td>{{ stats.count }}</td><td>{{ stats.percentage }}%</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Appeal Rate</h2>
+  <p><strong>{{ (data.appeal_rate * 100) | round(1) }}%</strong> of submissions have been appealed.</p>
+
+  <h2>Average Confidence</h2>
+  <p>Mean confidence score across all submissions: <strong>{{ data.average_confidence }}</strong></p>
+
+  <p><a href="/log">View raw audit log (JSON)</a></p>
+</body>
+</html>
+"""
+
+
+@app.route("/analytics", methods=["GET"])
+def analytics():
+    data = audit.get_analytics()
+    if request.args.get("format") == "json":
+        return jsonify(data)
+    return render_template_string(_ANALYTICS_TEMPLATE, data=data)
 
 
 if __name__ == "__main__":

@@ -296,6 +296,49 @@ reasoning in reverse). `marker_score` correctly maxes out only on the sample con
 hedging phrases ("furthermore," "it is important to note") and is 0 on the others — visible proof
 the third signal is doing real, independent work rather than just padding the average.
 
+### Analytics Dashboard
+
+`GET /analytics` aggregates over the existing audit log (no new tables, no new write path) into
+three metrics ([`audit.py`](audit.py): `get_analytics`):
+
+1. **Detection pattern** — count and percentage of submissions in each attribution band.
+2. **Appeal rate** — fraction of all submissions whose status is `under_review`.
+3. **Average confidence** — mean confidence across all submissions, as a sanity-check metric: a
+   system that's always near 0.5 is being maximally uncertain; one that's always near 0/1 may be
+   overconfident.
+
+Purpose: `GET /log` shows individual decisions for a specific reviewer looking at a specific
+appeal; `GET /analytics` is the complementary system-wide view a platform operator would check to
+monitor whether the pipeline is behaving sanely in aggregate (e.g. "are we flagging way more
+content as AI than human?", "are creators frequently disputing our calls?"). Visiting `/analytics`
+in a browser renders a plain HTML table; `/analytics?format=json` returns the same data as JSON.
+
+**Why a visual, at-a-glance view rather than just another JSON endpoint**: `/log` already exposes
+every individual entry as JSON, but reading system-wide health out of a list of dozens of raw rows
+means mentally tallying counts and percentages by hand. `/analytics` does that aggregation once,
+server-side, and renders it as a small HTML table instead — something a non-technical platform
+operator could glance at and immediately understand, the same plain-language principle behind the
+transparency label itself (see [Transparency Label](#transparency-label)). The page is **live, not
+a static snapshot**: `audit.get_analytics()` re-runs its query against `logs/audit.db` on every
+request, so refreshing `/analytics` after more submissions or appeals come in immediately shows
+updated counts and rates — it reflects how the system is doing *right now*, not a fixed example
+baked in at write time.
+
+Sample output after 5 calibration submissions + 1 appeal (matching the Audit Log sample above):
+
+```json
+{
+  "total_submissions": 5,
+  "detection_pattern": {
+    "likely_ai": {"count": 0, "percentage": 0.0},
+    "uncertain": {"count": 2, "percentage": 40.0},
+    "likely_human": {"count": 3, "percentage": 60.0}
+  },
+  "appeal_rate": 0.2,
+  "average_confidence": 0.391
+}
+```
+
 ### Honest retrospective: did adding a 3rd signal actually improve detection?
 
 The rubric asks for 3+ signals with a documented weighting strategy. The implicit question behind
@@ -390,6 +433,18 @@ rule that the spec is the source of truth and should be corrected rather than si
    accepting it: no attribution band flipped, but the AI sample's confidence correctly rose
    (0.547 → 0.574) and the human sample's correctly fell (0.257 → 0.234), reflecting that the
    weights now matter for disagreement, not just for the base average.
+
+6. **Implementing the Analytics Dashboard stretch feature**: the rubric's literal ask was a `GET`
+   endpoint that exposes aggregated detection/appeal data so a platform operator could check system
+   status — i.e., the data already sitting in the audit log, just summarized. Directed the AI to
+   build that as a straightforward JSON aggregation (`audit.get_analytics()`) first. After getting
+   that working, decided the JSON-only version didn't actually serve the stated purpose well: a
+   wall of nested JSON still requires manually parsing percentages and rates to get an "at a
+   glance" read on what's happening. Asked the AI to add an additional step beyond the original
+   ask — a plain HTML table rendering the same data — specifically so the result could be read
+   visually in a browser at a glance, not just programmatically. Kept both: `/analytics` renders
+   HTML by default, `/analytics?format=json` returns the identical data as JSON, so neither
+   audience (human glancing at it vs. a script polling it) is worse off.
 
 ## Demo Video
 

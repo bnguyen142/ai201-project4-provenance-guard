@@ -281,8 +281,31 @@ For each implementation milestone, specify which spec sections you'll provide, w
 
 - [x] Ensemble detection — design below, implementing now.
 - [ ] Provenance certificate
-- [ ] Analytics dashboard
+- [x] Analytics dashboard — design below, implementing now.
 - [ ] Multi-modal support
+
+### Analytics Dashboard (stretch)
+
+**What it shows**: a `GET /analytics` endpoint that aggregates across all entries in the existing
+audit log (no new tables, no new write path) into three metrics:
+
+1. **Detection pattern** — count and percentage of submissions in each attribution band
+   (`likely_ai` / `uncertain` / `likely_human`).
+2. **Appeal rate** — fraction of all submissions whose status is `under_review`.
+3. **Average confidence** — mean `confidence` across all submissions, as a sanity-check metric: a
+   system that's always near 0.5 is being maximally uncertain; one that's always near 0/1 may be
+   overconfident.
+
+**Audience and purpose**: `GET /log` shows individual decisions (one row per submission) for a
+specific reviewer looking at a specific appeal. `GET /analytics` is the complementary system-wide
+view — closer to what a platform operator/moderator would check to monitor whether the detection
+pipeline is behaving sanely in aggregate (e.g. "are we flagging way more content as AI than
+human?", "are creators frequently disputing our calls?").
+
+**Implementation**: `audit.get_analytics()` runs one `SELECT attribution, confidence, status FROM
+log_entries` and aggregates in Python (`audit.py`). The route (`app.py`: `/analytics`) renders a
+plain unstyled HTML table by default for at-a-glance viewing, or returns the same data as JSON via
+`?format=json` — same data, two representations, no duplicate logic.
 
 ### Ensemble Detection (stretch)
 

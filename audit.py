@@ -99,3 +99,44 @@ def get_log() -> list[dict]:
             "SELECT * FROM log_entries ORDER BY timestamp ASC"
         ).fetchall()
         return [dict(row) for row in rows]
+
+
+def get_analytics() -> dict:
+    """
+    Aggregate metrics over all log entries, for the Analytics Dashboard stretch
+    feature. Complements GET /log (individual decisions) with a system-wide view:
+    detection pattern (counts/percentages by attribution), appeal rate, and
+    average confidence as a sanity-check metric.
+    """
+    with _connect() as conn:
+        rows = conn.execute("SELECT attribution, confidence, status FROM log_entries").fetchall()
+
+    total = len(rows)
+    if total == 0:
+        return {
+            "total_submissions": 0,
+            "detection_pattern": {"likely_ai": 0, "uncertain": 0, "likely_human": 0},
+            "appeal_rate": 0.0,
+            "average_confidence": 0.0,
+        }
+
+    counts = {"likely_ai": 0, "uncertain": 0, "likely_human": 0}
+    appealed = 0
+    confidence_sum = 0.0
+    for row in rows:
+        counts[row["attribution"]] += 1
+        if row["status"] == "under_review":
+            appealed += 1
+        confidence_sum += row["confidence"]
+
+    detection_pattern = {
+        label: {"count": count, "percentage": round(100 * count / total, 1)}
+        for label, count in counts.items()
+    }
+
+    return {
+        "total_submissions": total,
+        "detection_pattern": detection_pattern,
+        "appeal_rate": round(appealed / total, 3),
+        "average_confidence": round(confidence_sum / total, 3),
+    }
