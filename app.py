@@ -43,6 +43,7 @@ def submit():
     audit.log_submission(
         content_id=content_id,
         creator_id=creator_id,
+        text=text,
         attribution=attribution,
         confidence=confidence,
         llm_score=llm_score,

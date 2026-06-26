@@ -24,6 +24,7 @@ def init_db() -> None:
                 content_id TEXT PRIMARY KEY,
                 creator_id TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
+                text TEXT,
                 attribution TEXT NOT NULL,
                 confidence REAL NOT NULL,
                 llm_score REAL NOT NULL,
@@ -37,11 +38,14 @@ def init_db() -> None:
         existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(log_entries)")}
         if "marker_score" not in existing_columns:
             conn.execute("ALTER TABLE log_entries ADD COLUMN marker_score REAL")
+        if "text" not in existing_columns:
+            conn.execute("ALTER TABLE log_entries ADD COLUMN text TEXT")
 
 
 def log_submission(
     content_id: str,
     creator_id: str,
+    text: str,
     attribution: str,
     confidence: float,
     llm_score: float,
@@ -52,14 +56,15 @@ def log_submission(
         conn.execute(
             """
             INSERT INTO log_entries (
-                content_id, creator_id, timestamp, attribution, confidence,
+                content_id, creator_id, timestamp, text, attribution, confidence,
                 llm_score, stylometric_score, marker_score, status, appeal_reasoning
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'classified', NULL)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'classified', NULL)
             """,
             (
                 content_id,
                 creator_id,
                 datetime.now(timezone.utc).isoformat(),
+                text,
                 attribution,
                 confidence,
                 llm_score,

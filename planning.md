@@ -145,10 +145,12 @@ Response:
       "content_id": "uuid",
       "creator_id": "string",
       "timestamp": "ISO 8601",
+      "text": "string, the originally submitted content",
       "attribution": "likely_ai | uncertain | likely_human",
       "confidence": 0.78,
       "llm_score": 0.81,
       "stylometric_score": 0.74,
+      "marker_score": 0.0,
       "status": "classified | under_review",
       "appeal_reasoning": "string | null"
     }

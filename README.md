@@ -201,18 +201,54 @@ one-minute window, so the cap correctly triggered at the cumulative 10th request
 ## Audit Log
 
 Stored as SQLite (`logs/audit.db`, gitignored) via [`audit.py`](audit.py) — never `print()`.
-Every row includes `content_id`, `creator_id`, `timestamp`, `attribution`, `confidence`,
-`llm_score`, `stylometric_score`, `marker_score`, `status`, and `appeal_reasoning`. `GET /log`
-returns all rows as JSON. Sample (5 entries from testing, one with an appeal):
+Every row includes `content_id`, `creator_id`, `timestamp`, `text`, `attribution`, `confidence`,
+`llm_score`, `stylometric_score`, `marker_score`, `status`, and `appeal_reasoning`. The `text`
+field stores the original submitted content so any verdict can be audited against the evidence that
+produced it. `GET /log` returns all rows as JSON. Sample (3 entries from testing, including two with
+appeals):
 
 ```json
 {
   "entries": [
-    {"content_id": "2011ffd5-8c33-4e9e-ae82-d87de9e1bf07", "creator_id": "test-ai", "timestamp": "2026-06-25T03:46:15.886278+00:00", "attribution": "uncertain", "confidence": 0.5744343976781952, "llm_score": 0.9, "stylometric_score": 0.4128664730092069, "marker_score": 1.0, "status": "classified", "appeal_reasoning": null},
-    {"content_id": "bae58c34-6685-4385-a10e-f3cb6bceb063", "creator_id": "test-human", "timestamp": "2026-06-25T03:46:16.246101+00:00", "attribution": "likely_human", "confidence": 0.2338714955567699, "llm_score": 0.2, "stylometric_score": 0.25068870523415987, "marker_score": 0.0, "status": "classified", "appeal_reasoning": null},
-    {"content_id": "4771ebcb-b83a-4fb9-adeb-471aa661cf6c", "creator_id": "test-formal-human", "timestamp": "2026-06-25T03:46:16.700591+00:00", "attribution": "uncertain", "confidence": 0.5005615536612509, "llm_score": 0.8, "stylometric_score": 0.34766267324406863, "marker_score": 0.0, "status": "classified", "appeal_reasoning": null},
-    {"content_id": "0c2d8d3b-eeae-4913-9f1f-cc285ad6ccb7", "creator_id": "test-edited-ai", "timestamp": "2026-06-25T03:46:17.118409+00:00", "attribution": "likely_human", "confidence": 0.3748892781561935, "llm_score": 0.4, "stylometric_score": 0.38943852574473237, "marker_score": 0.0, "status": "classified", "appeal_reasoning": null},
-    {"content_id": "b76c0d38-a512-4e88-90d8-adbebb49c82c", "creator_id": "appeal-tester", "timestamp": "2026-06-25T03:46:17.520440+00:00", "attribution": "likely_human", "confidence": 0.3134874689208442, "llm_score": 0.1, "stylometric_score": 0.48564593301435405, "marker_score": 0.0, "status": "under_review", "appeal_reasoning": "I wrote this myself."}
+    {
+      "content_id": "6ce9c42b-355f-4545-8d20-f31ec805b508",
+      "creator_id": "test-human",
+      "timestamp": "2026-06-26T06:18:13.145647+00:00",
+      "text": "ok so i finally tried that new ramen place downtown and honestly? underwhelming. the broth was fine but they put WAY too much sodium in it and i was thirsty for like three hours after. my friend got the spicy version and said it was better. probably wont go back unless someone drags me there",
+      "attribution": "likely_human",
+      "confidence": 0.2338714955567699,
+      "llm_score": 0.2,
+      "stylometric_score": 0.25068870523415987,
+      "marker_score": 0.0,
+      "status": "classified",
+      "appeal_reasoning": null
+    },
+    {
+      "content_id": "7d51b47e-a17a-4418-8f2e-672c46c7ff7c",
+      "creator_id": "test_user_1",
+      "timestamp": "2026-06-26T06:12:59.810046+00:00",
+      "text": "The quick brown fox jumps over the lazy dog. This is a simple test sentence written by a human.",
+      "attribution": "likely_human",
+      "confidence": 0.3860815429202621,
+      "llm_score": 0.2,
+      "stylometric_score": 0.6230728335991493,
+      "marker_score": 0.0,
+      "status": "under_review",
+      "appeal_reasoning": "I wrote this myself, it is a well known pangram sentence used for testing."
+    },
+    {
+      "content_id": "7ccb7f12-30ed-41f5-8d8d-52fe999edea4",
+      "creator_id": "test-ai",
+      "timestamp": "2026-06-26T06:18:13.567452+00:00",
+      "text": "Artificial intelligence represents a transformative paradigm shift in modern society. It is important to note that while the benefits of AI are numerous, it is equally essential to consider the ethical implications. Furthermore, stakeholders across various sectors must collaborate to ensure responsible deployment.",
+      "attribution": "uncertain",
+      "confidence": 0.5744343976781952,
+      "llm_score": 0.9,
+      "stylometric_score": 0.4128664730092069,
+      "marker_score": 1.0,
+      "status": "under_review",
+      "appeal_reasoning": "I wrote this myself for a professional report. My writing style is formal by training."
+    }
   ]
 }
 ```
@@ -377,6 +413,8 @@ a system (and the engineer building it) should acknowledge what it doesn't know,
 its own design choices, instead of asserting confidence it hasn't earned.
 
 ## Spec Reflection
+
+**A gap discovered during review**: the original audit log was designed to record decisions but not the input that produced them — `log_submission()` saved attribution, confidence, and signal scores, but never the submitted text itself. Each feature (submission, scoring, appeals, audit) was correct in isolation, but tracing the full appeal flow — creator disputes a verdict → reviewer investigates — exposed the break: a reviewer looking at an appeal could see the creator's reasoning but had no text to evaluate it against. The evidence was discarded the moment the classification was returned. This was fixed by adding a `text` column to the audit log and passing the original submission through to `log_submission()`. The lesson: audit log design needs to be driven by downstream use cases (appeals, re-analysis, debugging), not just by what each individual feature produces.
 
 **Where the spec helped**: writing out the exact JSON shape for the Groq call in `planning.md`
 *before* touching `signals.py` meant the JSON-mode integration worked correctly the first time —
