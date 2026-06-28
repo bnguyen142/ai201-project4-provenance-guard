@@ -120,7 +120,10 @@ def get_analytics() -> dict:
     if total == 0:
         return {
             "total_submissions": 0,
-            "detection_pattern": {"likely_ai": 0, "uncertain": 0, "likely_human": 0},
+            "detection_pattern": {
+                label: {"count": 0, "percentage": 0.0}
+                for label in ("likely_ai", "uncertain", "likely_human")
+            },
             "appeal_rate": 0.0,
             "average_confidence": 0.0,
         }
